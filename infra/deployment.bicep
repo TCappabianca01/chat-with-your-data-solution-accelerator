@@ -147,6 +147,16 @@ param SpeechServiceName string = '${ResourcePrefix}-speechservice'
 param ContentSafetyName string = '${ResourcePrefix}-contentsafety'
 param newGuidString string = newGuid()
 
+@description('Provide a globally unique name of your Azure Container Registry')
+param AzureContainerRegistryName string = '${ResourcePrefix}acr'
+
+// @description('Provide a tier of your Azure Container Registry.')
+// param AzureContainerRegistrySku string = 'Basic'
+
+param WebAppImageName  string = 'rag-webapp:latest'
+param AdminWebAppImageName string = 'rag-adminwebapp:latest'
+param BackendImageName string = 'rag-backend:latest'
+
 @allowed([
   'keys'
   'rbac'
@@ -156,9 +166,21 @@ param authType string = 'keys'
 @description('Id of the user or app to assign application roles')
 param principalId string = ''
 
-var WebAppImageName = 'DOCKER|fruoccopublic.azurecr.io/rag-webapp'
-var AdminWebAppImageName = 'DOCKER|fruoccopublic.azurecr.io/rag-adminwebapp'
-var BackendImageName = 'DOCKER|fruoccopublic.azurecr.io/rag-backend'
+param WebsiteAppRegistrationClientId string = ''
+@secure()
+param WebsiteAppRegistrationSecret string = ''
+param WebsiteAdminAppRegistrationClientId string = ''
+@secure()
+param WebsiteAdminAppRegistrationSecret string = ''
+
+//original
+// var WebAppImageName  = 'DOCKER|fruoccopublic.azurecr.io/rag-webapp'
+// var AdminWebAppImageName  = 'DOCKER|fruoccopublic.azurecr.io/rag-adminwebapp'
+// var BackendImageName  = 'DOCKER|fruoccopublic.azurecr.io/rag-backend'
+
+var WebAppImageReference  = 'DOCKER|${AzureContainerRegistryName}.azurecr.io/${WebAppImageName}'
+var AdminWebAppImageReference  = 'DOCKER|${AzureContainerRegistryName}.azurecr.io/${AdminWebAppImageName}'
+var BackendImageReference  = 'DOCKER|${AzureContainerRegistryName}.azurecr.io/${BackendImageName}'
 
 var BlobContainerName = 'documents'
 var QueueName = 'doc-processing'
@@ -296,6 +318,10 @@ resource ContentSafety 'Microsoft.CognitiveServices/accounts@2022-03-01' = {
   }
 }
 
+resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+  name: AzureContainerRegistryName
+}
+
 resource HostingPlan 'Microsoft.Web/serverfarms@2020-06-01' = {
   name: HostingPlanName
   location: Location
@@ -312,8 +338,8 @@ resource Website 'Microsoft.Web/sites@2020-06-01' = {
   name: WebsiteName
   location: Location
   properties: {
-    serverFarmId: HostingPlanName
-    siteConfig: {
+    serverFarmId: HostingPlan.id
+    siteConfig: {      
       appSettings: [
         { name: 'APPINSIGHTS_CONNECTION_STRING', value: reference(ApplicationInsights.id, '2015-05-01').ConnectionString}
         { name: 'AZURE_SEARCH_SERVICE', value: 'https://${AzureCognitiveSearch}.search.windows.net'}
@@ -353,21 +379,137 @@ resource Website 'Microsoft.Web/sites@2020-06-01' = {
         { name: 'AZURE_SPEECH_SERVICE_NAME', value: SpeechServiceName}
         { name: 'AZURE_SPEECH_SERVICE_KEY', value: listKeys('Microsoft.CognitiveServices/accounts/${SpeechServiceName}', '2023-05-01').key1}
         { name: 'AZURE_SPEECH_SERVICE_REGION', value: Location}
+        { name: 'DOCKER_ENABLE_CI', value: 'false'}
+        { name: 'DOCKER_REGISTRY_SERVER_USERNAME', value: authType == 'keys' ? AzureContainerRegistryName : null}
+        { name: 'DOCKER_REGISTRY_SERVER_URL', value: authType == 'keys' ? acr.properties.loginServer : null}
+        { name: 'DOCKER_REGISTRY_SERVER_PASSWORD', value: authType == 'keys' ? acr.listCredentials('2023-07-01').passwords[0].value : null}
+        { name: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET', value: WebsiteAppRegistrationSecret}
       ]
-      linuxFxVersion: WebAppImageName
+      linuxFxVersion: WebAppImageReference
     }
   }
   identity: { type: authType == 'rbac' ? 'SystemAssigned' : 'None' }
-  dependsOn: [
-    HostingPlan
-  ]
+}
+
+resource websiteAuth 'Microsoft.Web/sites/config@2022-09-01' = {
+  name: 'authsettingsV2'
+  parent: Website
+  properties: {
+    globalValidation: {
+      redirectToProvider: 'azureactivedirectory'
+      requireAuthentication: true
+      unauthenticatedClientAction: 'RedirectToLoginPage'
+    }
+    httpSettings: {
+      forwardProxy: {
+        convention: 'NoProxy'
+      }
+      requireHttps: true
+      routes: {
+        apiPrefix: './auth'
+      }
+    }    
+    identityProviders: {
+      apple: {
+        enabled: false
+        login: {}
+        registration: {}
+      }
+      azureActiveDirectory: {
+        enabled: true
+        login: {
+          disableWWWAuthenticate: false
+        }
+        registration: {
+          clientId: WebsiteAppRegistrationClientId
+          clientSecretSettingName: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET'
+          openIdIssuer: 'https://sts.windows.net/${tenant().tenantId}/v2.0'
+        }
+        validation: {
+          allowedAudiences: [
+            'api://${WebsiteAppRegistrationClientId}'
+          ]
+          defaultAuthorizationPolicy: {
+            allowedApplications: []
+            allowedPrincipals: {
+              // groups: [
+              //   'string'
+              // ]
+              // identities: [
+              //   'string'
+              // ]
+            }
+          }
+          jwtClaimChecks: {
+            // allowedClientApplications: [
+            //   'string'
+            // ]
+            // allowedGroups: [
+            //   'string'
+            // ]
+          }
+        }
+      }
+      azureStaticWebApps: {
+        enabled: false
+        registration: {}
+      }
+      customOpenIdConnectProviders: {}
+      facebook: {
+        enabled: false
+        login: {}
+        registration: {}
+      }
+      gitHub: {
+        enabled: false
+        login: {}
+        registration: {}
+      }
+      google: {
+        enabled: false
+        login: {}
+        registration: {}
+        validation: {}
+      }
+      legacyMicrosoftAccount: {
+        enabled: false
+        login: {}
+        registration: {}
+        validation: {}
+      }
+      twitter: {
+        enabled: false
+        registration: {}
+      }
+    }
+    login: {
+      cookieExpiration: {
+        convention: 'FixedTime'
+        timeToExpiration: '08:00:00'
+      }
+      nonce: {
+        nonceExpirationInterval: '00:05:00'
+        validateNonce: true
+      }
+      preserveUrlFragmentsForLogins: false
+      routes: {
+        logoutEndpoint: '/.auth/logout'
+      }
+      tokenStore: {
+        azureBlobStorage: {}
+        enabled: true
+        fileSystem: {}
+        tokenRefreshExtensionHours: 72
+      }
+    }
+  }
 }
 
 resource WebsiteName_admin 'Microsoft.Web/sites@2020-06-01' = {
   name: '${WebsiteName}-admin'
   location: Location
   properties: {
-    serverFarmId: HostingPlanName
+    serverFarmId: HostingPlan.id
     siteConfig: {
       appSettings: [
         { name: 'APPINSIGHTS_INSTRUMENTATIONKEY', value: reference(ApplicationInsights.id, '2015-05-01').InstrumentationKey }
@@ -407,14 +549,130 @@ resource WebsiteName_admin 'Microsoft.Web/sites@2020-06-01' = {
         { name: 'ORCHESTRATION_STRATEGY', value: OrchestrationStrategy}
         { name: 'AZURE_CONTENT_SAFETY_ENDPOINT', value: 'https://${Location}.api.cognitive.microsoft.com/'}
         { name: 'AZURE_CONTENT_SAFETY_KEY', value: listKeys('Microsoft.CognitiveServices/accounts/${ContentSafetyName}', '2023-05-01').key1}
+        { name: 'DOCKER_ENABLE_CI', value: 'false'}
+        { name: 'DOCKER_REGISTRY_SERVER_USERNAME', value: authType == 'keys' ? AzureContainerRegistryName : null}
+        { name: 'DOCKER_REGISTRY_SERVER_URL', value: authType == 'keys' ? acr.properties.loginServer : null}
+        { name: 'DOCKER_REGISTRY_SERVER_PASSWORD', value: authType == 'keys' ? acr.listCredentials('2023-07-01').passwords[0].value : null}
+        { name: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET', value: WebsiteAdminAppRegistrationSecret}
       ]
-      linuxFxVersion: AdminWebAppImageName
+      linuxFxVersion: AdminWebAppImageReference
     }
   }
   identity: { type: authType == 'rbac' ? 'SystemAssigned' : 'None' }
-  dependsOn: [
-    HostingPlan
-  ]
+}
+
+resource websiteAdminAuth 'Microsoft.Web/sites/config@2022-09-01' = {
+  name: 'authsettingsV2'
+  parent: WebsiteName_admin
+  properties: {
+    globalValidation: {
+      redirectToProvider: 'azureactivedirectory'
+      requireAuthentication: true
+      unauthenticatedClientAction: 'RedirectToLoginPage'
+    }
+    httpSettings: {
+      forwardProxy: {
+        convention: 'NoProxy'
+      }
+      requireHttps: true
+      routes: {
+        apiPrefix: './auth'
+      }
+    }    
+    identityProviders: {
+      apple: {
+        enabled: false
+        login: {}
+        registration: {}
+      }
+      azureActiveDirectory: {
+        enabled: true
+        login: {
+          disableWWWAuthenticate: false
+        }
+        registration: {
+          clientId: WebsiteAdminAppRegistrationClientId
+          clientSecretSettingName: 'MICROSOFT_PROVIDER_AUTHENTICATION_SECRET'
+          openIdIssuer: 'https://sts.windows.net/${tenant().tenantId}/v2.0'
+        }
+        validation: {
+          allowedAudiences: [
+            'api://${WebsiteAdminAppRegistrationClientId}'
+          ]
+          defaultAuthorizationPolicy: {
+            allowedApplications: []
+            allowedPrincipals: {
+              // groups: [
+              //   'string'
+              // ]
+              // identities: [
+              //   'string'
+              // ]
+            }
+          }
+          jwtClaimChecks: {
+            // allowedClientApplications: [
+            //   'string'
+            // ]
+            // allowedGroups: [
+            //   'string'
+            // ]
+          }
+        }
+      }
+      azureStaticWebApps: {
+        enabled: false
+        registration: {}
+      }
+      customOpenIdConnectProviders: {}
+      facebook: {
+        enabled: false
+        login: {}
+        registration: {}
+      }
+      gitHub: {
+        enabled: false
+        login: {}
+        registration: {}
+      }
+      google: {
+        enabled: false
+        login: {}
+        registration: {}
+        validation: {}
+      }
+      legacyMicrosoftAccount: {
+        enabled: false
+        login: {}
+        registration: {}
+        validation: {}
+      }
+      twitter: {
+        enabled: false
+        registration: {}
+      }
+    }
+    login: {
+      cookieExpiration: {
+        convention: 'FixedTime'
+        timeToExpiration: '08:00:00'
+      }
+      nonce: {
+        nonceExpirationInterval: '00:05:00'
+        validateNonce: true
+      }
+      preserveUrlFragmentsForLogins: false
+      routes: {
+        logoutEndpoint: '/.auth/logout'
+      }
+      tokenStore: {
+        azureBlobStorage: {}
+        enabled: true
+        fileSystem: {}
+        tokenRefreshExtensionHours: 72
+      }
+    }
+  }
 }
 
 resource StorageAccount 'Microsoft.Storage/storageAccounts@2021-08-01' = {
@@ -527,6 +785,10 @@ resource Function 'Microsoft.Web/sites@2018-11-01' = {
         { name: 'ORCHESTRATION_STRATEGY', value: OrchestrationStrategy}
         { name: 'AZURE_CONTENT_SAFETY_ENDPOINT', value: 'https://${Location}.api.cognitive.microsoft.com/'}
         { name: 'AZURE_CONTENT_SAFETY_KEY', value: listKeys('Microsoft.CognitiveServices/accounts/${ContentSafetyName}', '2023-05-01').key1}
+        { name: 'DOCKER_ENABLE_CI', value: 'false'}
+        { name: 'DOCKER_REGISTRY_SERVER_USERNAME', value: authType == 'keys' ? AzureContainerRegistryName : null}
+        { name: 'DOCKER_REGISTRY_SERVER_URL', value: authType == 'keys' ? acr.properties.loginServer : null}
+        { name: 'DOCKER_REGISTRY_SERVER_PASSWORD', value: authType == 'keys' ? acr.listCredentials('2023-07-01').passwords[0].value : null}
       ]
       cors: {
         allowedOrigins: [
@@ -534,7 +796,7 @@ resource Function 'Microsoft.Web/sites@2018-11-01' = {
         ]
       }
       use32BitWorkerProcess: false
-      linuxFxVersion: BackendImageName
+      linuxFxVersion: BackendImageReference
       appCommandLine: ''
       alwaysOn: true
     }

@@ -1,6 +1,6 @@
 using './deployment.bicep'
 
-param ResourcePrefix = 'tcchatdemo01'
+param ResourcePrefix = 'cmwtestdeploy'
 param Location = 'eastus'
 param HostingPlanName = '${ResourcePrefix}-hosting-plan'
 param HostingPlanSku = 'B3'
@@ -44,4 +44,7 @@ param ContentSafetyName = '${ResourcePrefix}-contentsafety'
 /* param newGuidString = ? TODO : please fix the value assigned to this parameter `newGuid()` */
 param authType = 'keys'
 param principalId = ''
-
+param AzureContainerRegistryName = '${ResourcePrefix}acr'
+param WebAppImageName = 'rag-webapp:latest'
+param AdminWebAppImageName = 'rag-adminwebapp:latest'
+param BackendImageName = 'rag-backend:latest'
