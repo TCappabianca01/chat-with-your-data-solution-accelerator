@@ -156,6 +156,12 @@ param authType string = 'keys'
 @description('Id of the user or app to assign application roles')
 param principalId string = ''
 
+@description('Front Door Name')
+param FrontDoorName string = '${ResourcePrefix}-afd'
+
+@description('Hostname of the backend site')
+param BackendAddress string = '${ResourcePrefix}-website.azurewebsites.net'
+
 var WebAppImageName = 'DOCKER|fruoccopublic.azurecr.io/rag-webapp'
 var AdminWebAppImageName = 'DOCKER|fruoccopublic.azurecr.io/rag-adminwebapp'
 var BackendImageName = 'DOCKER|fruoccopublic.azurecr.io/rag-backend'
@@ -164,6 +170,12 @@ var BlobContainerName = 'documents'
 var QueueName = 'doc-processing'
 var ClientKey = '${uniqueString(guid(resourceGroup().id, deployment().name))}${newGuidString}'
 var EventGridSystemTopicName = 'doc-processing'
+
+var FrontEndEndpointName = '${ResourcePrefix}-ep'
+var LoadBalancingSettingsName = '${ResourcePrefix}-lb'
+var HealthProbeSettingsName = '${ResourcePrefix}-hp'
+var RoutingRuleNames = '${ResourcePrefix}-rr'
+var BackendPoolName = '${ResourcePrefix}-bp'
 
 resource OpenAI 'Microsoft.CognitiveServices/accounts@2021-10-01' = {
   name: AzureOpenAIResource
@@ -607,6 +619,98 @@ resource EventGridSystemTopicName_BlobEvents 'Microsoft.EventGrid/systemTopics/e
       maxDeliveryAttempts: 30
       eventTimeToLiveInMinutes: 1440
     }
+  }
+}
+
+resource FrontDoor 'Microsoft.Network/frontDoors@2021-06-01' = {
+  name: FrontDoorName
+  location: 'global'
+  properties: {
+    enabledState: 'Enabled'
+
+    frontendEndpoints: [
+      {
+        name: FrontEndEndpointName
+        properties: {
+          hostName: '${FrontDoorName}.azurefd.net'
+          sessionAffinityEnabledState: 'Disabled'
+        }
+      }
+    ]
+
+    loadBalancingSettings: [
+      {
+        name: LoadBalancingSettingsName
+        properties: {
+          sampleSize: 4
+          successfulSamplesRequired: 2
+        }
+      }
+    ]
+
+    healthProbeSettings: [
+      {
+        name: HealthProbeSettingsName
+        properties: {
+          path: '/'
+          protocol: 'Http'
+          intervalInSeconds: 120
+        }
+      }
+    ]
+
+    backendPools: [
+      {
+        name: BackendPoolName
+        properties: {
+          backends: [
+            {
+              address: BackendAddress
+              backendHostHeader: BackendAddress
+              httpPort: 80
+              httpsPort: 443
+              weight: 50
+              priority: 1
+              enabledState: 'Enabled'
+            }
+          ]
+          loadBalancingSettings: {
+            id: resourceId('Microsoft.Network/frontDoors/loadBalancingSettings', FrontDoorName, LoadBalancingSettingsName)
+          }
+          healthProbeSettings: {
+            id: resourceId('Microsoft.Network/frontDoors/healthProbeSettings', FrontDoorName, HealthProbeSettingsName)
+          }
+        }
+      }
+    ]
+
+    routingRules: [
+      {
+        name: RoutingRuleNames
+        properties: {
+          frontendEndpoints: [
+            {
+              id: resourceId('Microsoft.Network/frontDoors/frontEndEndpoints', FrontDoorName, FrontEndEndpointName)
+            }
+          ]
+          acceptedProtocols: [
+            'Http'
+            'Https'
+          ]
+          patternsToMatch: [
+            '/*'
+          ]
+          routeConfiguration: {
+            '@odata.type': '#Microsoft.Azure.FrontDoor.Models.FrontdoorForwardingConfiguration'
+            forwardingProtocol: 'MatchRequest'
+            backendPool: {
+              id: resourceId('Microsoft.Network/frontDoors/backEndPools', FrontDoorName, BackendPoolName)
+            }
+          }
+          enabledState: 'Enabled'
+        }
+      }
+    ]
   }
 }
 
