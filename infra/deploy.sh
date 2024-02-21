@@ -31,17 +31,21 @@ az acr create --name $acrName --resource-group $rgName --sku Basic --admin-enabl
 
 # Import the standard images from the public registry
 repositories=("rag-webapp" "rag-adminwebapp" "rag-backend")
+repoList=$(az acr repository list --name $acrName)
 
 for repo in "${repositories[@]}"; do
-  imageExists=$(az acr repository show-tags --name $acrName --repository $repo | grep -c "latest")
-  if [ $imageExists -eq 0 ]; then
+  repoExists=$(echo $repoList | jq -r '.[] | select(. == "'$repo'")' | wc -l)  
+  
+  if [ $repoExists -eq 0 ]; then
+    echo importing $repo
     az acr import --resource-group $rgName --name $acrName --source fruoccopublic.azurecr.io/$repo:latest --image $repo:latest
-  else
-    echo "Image already exists in the Azure Container Registry for repository: $repo"
+  else    
+    echo "Repo already exists in the Azure Container Registry: $repo"
   fi
 done
 
 # Create Azure AD App Registration with redirect URI
+echo "Creating App Registrations"
 clientSecretName="easyauthsecret"
 
 # Website
@@ -55,6 +59,7 @@ adminAppId=$(echo $adminApp | jq -r '.appId')
 adminClientSecret=$(az ad app credential reset --id $adminAppId --display-name $clientSecretName --query password --output tsv)
 
 # Deploy the resources defined in deployment.bicep
+echo "Deploying resources"
 az deployment group create -g $rgName -f deployment.bicep --parameters deployment.bicepparam \
  --parameters ResourcePrefix=$resourcePrefix Location=$location AzureContainerRegistryName=$acrName \
  WebsiteAppRegistrationClientId="$appId" WebsiteAppRegistrationSecret="$clientSecret" WebsiteAdminAppRegistrationClientId="$adminAppId" WebsiteAdminAppRegistrationSecret="$adminClientSecret"
