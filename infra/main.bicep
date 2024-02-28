@@ -158,6 +158,16 @@ param principalId string = ''
 ])
 param authType string
 
+@description('The name of the Front Door endpoint to create. This must be globally unique.')
+param frontDoorEndpointName string = '${environmentName}-afd'
+
+@description('The name of the SKU to use when creating the Front Door profile.')
+@allowed([
+  'Standard_AzureFrontDoor'
+  'Premium_AzureFrontDoor'
+])
+param frontDoorSkuName string = 'Standard_AzureFrontDoor'
+
 var blobContainerName = 'documents'
 var queueName = 'doc-processing'
 var clientKey = '${uniqueString(guid(subscription().id, deployment().name))}${newGuidString}'
@@ -554,6 +564,16 @@ module storage 'core/storage/storage-account.bicep' = {
   }
 }
 
+module frontDoor 'core/network/frontdoor.bicep' = {
+  scope: rg
+  name: 'front-door'
+  params: {
+    skuName: frontDoorSkuName
+    endpointName: frontDoorEndpointName
+    originHostName: web.outputs.FRONTEND_API_URI
+  }
+}
+
 // USER ROLES
 module storageRoleUser 'core/security/role.bicep' = if (authType == 'rbac') {
   scope: rg
@@ -752,3 +772,4 @@ output AZURE_SEARCH_KEY_NAME string = useKeyVault ? storekeys.outputs.SEARCH_KEY
 output AZURE_CONTENT_SAFETY_KEY_NAME string = useKeyVault ? storekeys.outputs.CONTENT_SAFETY_KEY_NAME : ''
 output AZURE_SPEECH_SERVICE_REGION string = location
 output AZURE_SPEECH_SERVICE_KEY_NAME string = useKeyVault ? storekeys.outputs.SPEECH_KEY_NAME : ''
+output frontDoorEndpointHostName string = frontDoor.outputs.frontDoorEndpointHostName
