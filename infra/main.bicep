@@ -570,7 +570,7 @@ module frontDoor 'core/network/frontdoor.bicep' = {
   params: {
     skuName: frontDoorSkuName
     endpointName: frontDoorEndpointName
-    originHostName: web.outputs.FRONTEND_API_URI
+    originHostName: web.outputs.hostname
   }
 }
 
