@@ -752,3 +752,6 @@ output AZURE_SEARCH_KEY_NAME string = useKeyVault ? storekeys.outputs.SEARCH_KEY
 output AZURE_CONTENT_SAFETY_KEY_NAME string = useKeyVault ? storekeys.outputs.CONTENT_SAFETY_KEY_NAME : ''
 output AZURE_SPEECH_SERVICE_REGION string = location
 output AZURE_SPEECH_SERVICE_KEY_NAME string = useKeyVault ? storekeys.outputs.SPEECH_KEY_NAME : ''
+output AZURE_WEBSITE_NAME string = websiteName
+output AZURE_ADMINWEBSITE_NAME string = '${websiteName}-admin'
+output AZURE_RESOURCE_GROUP string = rgName

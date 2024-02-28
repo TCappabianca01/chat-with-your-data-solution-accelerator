@@ -4,6 +4,12 @@ name: chat-with-your-data-solution-accelerator
 metadata:
   template: chat-with-your-data-solution-accelerator@0.0.1-beta
 
+hooks:
+  postprovision:
+    shell: sh
+    continueOnError: false
+    interactive: false
+    run: ./scripts/config-appsvc-auth.sh
 services:
   web:
     project: ./code
